@@ -1,9 +1,11 @@
 package net.semanticmetadata.lire.solr;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.ObjectOutputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -11,8 +13,11 @@ import java.util.Properties;
 
 import javax.swing.ProgressMonitor;
 
+import net.semanticmedatada.lire.solr.lsh.LSHHashTable;
+import net.semanticmedatada.lire.solr.lsh.SurfInterestPoint;
 import net.semanticmetadata.lire.DocumentBuilder;
 import net.semanticmetadata.lire.imageanalysis.ColorLayout;
+import net.semanticmetadata.lire.imageanalysis.SurfFeature;
 import net.semanticmetadata.lire.imageanalysis.bovw.LocalFeatureHistogramBuilder;
 import net.semanticmetadata.lire.imageanalysis.bovw.SurfFeatureHistogramBuilder;
 import net.semanticmetadata.lire.impl.ChainedDocumentBuilder;
@@ -29,6 +34,7 @@ import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.HttpSolrServer;
 import org.apache.solr.common.SolrInputDocument;
+
 
 
 public class Main {
@@ -126,11 +132,18 @@ public class Main {
 			inputDoc.addField("cl_ha", doc.getField(DocumentBuilder.FIELD_NAME_COLORLAYOUT + GenericDocumentBuilder.HASH_FIELD_SUFFIX).stringValue());
 			// SURF
 			IndexableField[] features = doc.getFields(DocumentBuilder.FIELD_NAME_SURF);
+			LSHHashTable.initialize();
+			LSHHashTable table = new LSHHashTable(features.length);
 			for (IndexableField feature : features) {
-				BytesRef featureBin = feature.binaryValue();
-				inputDoc.addField("su_hi", ByteBuffer.wrap(featureBin.bytes, featureBin.offset, featureBin.length));
-				//inputDoc.addField("su_hi", Base64.byteArrayToBase64(feature.binaryValue().bytes, feature.binaryValue().offset, feature.binaryValue().bytes.length));
+				table.addPoint(featureToInterestPoint(feature));
 			}
+			ByteArrayOutputStream baos = new ByteArrayOutputStream();
+			ObjectOutputStream oos = new ObjectOutputStream(baos);
+			oos.writeObject(table);
+			oos.close();
+			byte[] binaryData = baos.toByteArray();
+			baos.close();
+			inputDoc.addField("su_hi", ByteBuffer.wrap(binaryData));
 			inputDoc.addField("su_ha", doc.getField(DocumentBuilder.FIELD_NAME_SURF_VISUAL_WORDS).stringValue());
 			
 			buffer.add(inputDoc);
@@ -153,6 +166,13 @@ public class Main {
 		} catch (SolrServerException e) {
 			e.printStackTrace();
 		}
+	}
+	
+	private static SurfInterestPoint featureToInterestPoint(IndexableField feature) {
+		SurfFeature surfFeature = new SurfFeature();
+		surfFeature.setByteArrayRepresentation(feature.binaryValue().bytes, feature.binaryValue().offset, feature.binaryValue().length);
+		SurfInterestPoint point = new SurfInterestPoint(surfFeature.descriptor);
+		return point;
 	}
 	
 	private static void visualWords() throws IOException {
